@@ -7,3 +7,4 @@ data/essai.db
 .env.production
 uploads/
 public/uploads/
+# Keep data/seed-data.json tracked for Vercel auto-seeding

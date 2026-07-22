@@ -1,186 +1,259 @@
 /**
  * db-universal.js
- * Database adapter that uses Turso (libsql) in production (Vercel)
- * and sql.js (in-memory SQLite) in local development.
- *
- * On Vercel: set environment variables TURSO_DATABASE_URL and TURSO_AUTH_TOKEN
- * Locally: data/essai.db file is used via sql.js
+ * Universal database adapter:
+ *  - TURSO (production/Vercel): uses @libsql/client when TURSO_DATABASE_URL is set
+ *  - LOCAL (development): uses sql.js with data/essai.db
+ *  - VERCEL (no Turso): uses sql.js with /tmp/essai.db + auto-seeds from seed-data.json
  */
 
 require('dotenv').config();
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
-const IS_TURSO = !!(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN);
+const IS_TURSO = !!(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN &&
+                    process.env.TURSO_DATABASE_URL !== 'undefined');
+const IS_VERCEL = !!(process.env.VERCEL || process.env.VERCEL_ENV);
 
-let _client = null;
-let _localDb = null;
+// DB file path: /tmp on Vercel (writable), data/ locally
+const DB_PATH = IS_VERCEL
+  ? path.join('/tmp', 'essai.db')
+  : path.join(__dirname, '..', '..', 'data', 'essai.db');
 
-// ========================
-// TURSO (production) PATH
-// ========================
-async function getTursoClient() {
-  if (_client) return _client;
+const DATA_DIR = IS_VERCEL
+  ? '/tmp'
+  : path.join(__dirname, '..', '..', 'data');
+
+// Seed data bundled with the app (exported from local DB)
+const SEED_DATA_PATH = path.join(__dirname, '..', '..', 'data', 'seed-data.json');
+
+let _universalDb = null;
+
+// ============================================================
+// TURSO CLIENT
+// ============================================================
+async function getTursoDb() {
   const { createClient } = require('@libsql/client');
-  _client = createClient({
+  const client = createClient({
     url: process.env.TURSO_DATABASE_URL,
     authToken: process.env.TURSO_AUTH_TOKEN,
   });
-  console.log('[DB] Connected to Turso cloud database');
-  return _client;
+  console.log('[DB] ✅ Connected to Turso cloud database');
+  return new UniversalDb(client, 'turso');
 }
 
-// ========================
-// sql.js (local) PATH
-// ========================
-async function getLocalDb() {
-  if (_localDb) return _localDb;
-  const dataDir = path.join(__dirname, '..', '..', 'data');
-  const dbPath = path.join(dataDir, 'essai.db');
-
-  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+// ============================================================
+// SQL.JS (local or Vercel /tmp)
+// ============================================================
+async function getSqlJsDb() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
 
   const initSqlJs = require('sql.js');
   const SQL = await initSqlJs();
 
-  if (fs.existsSync(dbPath)) {
-    const fileBuffer = fs.readFileSync(dbPath);
-    _localDb = new SQL.Database(fileBuffer);
+  let sqlDb;
+  if (fs.existsSync(DB_PATH)) {
+    const fileBuffer = fs.readFileSync(DB_PATH);
+    sqlDb = new SQL.Database(fileBuffer);
+    console.log(`[DB] ✅ Loaded existing database from ${DB_PATH}`);
   } else {
-    _localDb = new SQL.Database();
+    sqlDb = new SQL.Database();
+    console.log(`[DB] 🆕 Created new in-memory database`);
   }
 
   let saveTimeout = null;
-  const saveToDisk = () => {
-    const data = _localDb.export();
-    fs.writeFileSync(dbPath, Buffer.from(data));
-  };
   const scheduleSave = () => {
     if (saveTimeout) clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(saveToDisk, 50);
+    saveTimeout = setTimeout(() => {
+      try {
+        const data = sqlDb.export();
+        fs.writeFileSync(DB_PATH, Buffer.from(data));
+      } catch (e) {
+        console.warn('[DB] Could not save to disk:', e.message);
+      }
+    }, 100);
   };
 
-  // Unified query interface wrapping sql.js
-  _localDb.query = (sql, params) => {
-    let stmt;
-    try {
-      stmt = _localDb.prepare(sql, params);
-      const rows = [];
-      while (stmt.step()) rows.push(stmt.getAsObject());
-      return rows;
-    } finally { if (stmt) stmt.free(); }
-  };
-
-  _localDb.runQuery = (sql, params) => {
-    let stmt;
-    try {
-      stmt = _localDb.prepare(sql);
-      if (params) stmt.bind(params);
-      stmt.step();
+  // Unified interface
+  const adapter = {
+    query: (sql, params) => {
+      let stmt;
+      try {
+        stmt = sqlDb.prepare(sql, params);
+        const rows = [];
+        while (stmt.step()) rows.push(stmt.getAsObject());
+        return rows;
+      } finally { if (stmt) stmt.free(); }
+    },
+    runQuery: (sql, params) => {
+      let stmt;
+      try {
+        stmt = sqlDb.prepare(sql);
+        if (params) stmt.bind(params);
+        stmt.step();
+        scheduleSave();
+        const r = sqlDb.exec('SELECT last_insert_rowid() as id');
+        return {
+          changes: sqlDb.getRowsModified(),
+          lastInsertRowid: r?.[0]?.values?.[0]?.[0] ?? null
+        };
+      } finally { if (stmt) stmt.free(); }
+    },
+    exec: (sql) => {
+      const r = sqlDb.exec(sql);
       scheduleSave();
-      const lastInsertResult = _localDb.exec('SELECT last_insert_rowid() as id');
-      const lastInsertRowid = lastInsertResult?.[0]?.values?.[0]?.[0] ?? null;
-      return { changes: _localDb.getRowsModified(), lastInsertRowid };
-    } finally { if (stmt) stmt.free(); }
+      return r;
+    }
   };
 
-  _localDb.exec = _localDb.exec.bind(_localDb);
-  // Patch exec to trigger save
-  const origExec = _localDb.exec.bind(_localDb);
-  _localDb.exec = (sql, params) => {
-    const result = origExec(sql, params);
-    scheduleSave();
-    return result;
-  };
-
-  // Run schema
-  const schemaPath = path.join(__dirname, 'schema.sql');
-  if (fs.existsSync(schemaPath)) {
-    const schemaSql = fs.readFileSync(schemaPath, 'utf8').replace(/--[^\n]*/g, '');
-    _localDb.exec(schemaSql);
-  }
-
-  console.log('[DB] Using local sql.js database');
-  return _localDb;
+  return new UniversalDb(adapter, 'sqljs');
 }
 
-// ========================
-// UNIVERSAL DB INTERFACE
-// ========================
+// ============================================================
+// UNIVERSAL DB WRAPPER
+// ============================================================
 class UniversalDb {
-  constructor(client, isTurso) {
+  constructor(client, type) {
     this._client = client;
-    this._isTurso = isTurso;
+    this._type = type; // 'turso' | 'sqljs'
   }
 
-  /**
-   * Execute a SELECT query, returns array of row objects
-   */
   async query(sql, params = []) {
-    if (this._isTurso) {
+    if (this._type === 'turso') {
       const result = await this._client.execute({ sql, args: params });
-      return result.rows.map(row => Object.fromEntries(
-        result.columns.map((col, i) => [col, row[i]])
-      ));
-    } else {
-      return this._client.query(sql, params);
+      return result.rows.map(row =>
+        Object.fromEntries(result.columns.map((col, i) => [col, row[i]]))
+      );
     }
+    return this._client.query(sql, params);
   }
 
-  /**
-   * Execute an INSERT/UPDATE/DELETE, returns { changes, lastInsertRowid }
-   */
   async runQuery(sql, params = []) {
-    if (this._isTurso) {
+    if (this._type === 'turso') {
       const result = await this._client.execute({ sql, args: params });
       return {
         changes: result.rowsAffected,
         lastInsertRowid: result.lastInsertRowid ? Number(result.lastInsertRowid) : null
       };
-    } else {
-      return this._client.runQuery(sql, params);
     }
+    return this._client.runQuery(sql, params);
   }
 
-  /**
-   * Execute multiple SQL statements (schema creation, etc.)
-   */
   async exec(sql) {
-    if (this._isTurso) {
-      // Split on semicolons, execute each statement
+    if (this._type === 'turso') {
       const statements = sql.split(';').map(s => s.trim()).filter(Boolean);
       for (const stmt of statements) {
-        await this._client.execute(stmt);
+        try { await this._client.execute(stmt); } catch (e) { /* ignore exists errors */ }
       }
     } else {
-      this._client.exec(sql);
+      try { this._client.exec(sql); } catch (e) { /* ignore */ }
     }
   }
 }
 
-let _universalDb = null;
-
-async function getDb() {
-  if (_universalDb) return _universalDb;
-
-  if (IS_TURSO) {
-    const client = await getTursoClient();
-    _universalDb = new UniversalDb(client, true);
-  } else {
-    const localDb = await getLocalDb();
-    _universalDb = new UniversalDb(localDb, false);
-  }
-
-  // Initialize schema if needed
+// ============================================================
+// SCHEMA + SEED FROM JSON
+// ============================================================
+async function initSchema(db) {
   const schemaPath = path.join(__dirname, 'schema.sql');
   if (fs.existsSync(schemaPath)) {
     const schemaSql = fs.readFileSync(schemaPath, 'utf8').replace(/--[^\n]*/g, '');
-    try {
-      await _universalDb.exec(schemaSql);
-    } catch (e) {
-      // Tables may already exist, ignore
+    await db.exec(schemaSql);
+  }
+}
+
+async function seedFromJson(db) {
+  if (!fs.existsSync(SEED_DATA_PATH)) {
+    console.log('[DB] No seed-data.json found, skipping auto-seed');
+    return;
+  }
+
+  // Check if already seeded
+  const existingWorkers = await db.query('SELECT COUNT(*) as cnt FROM workers');
+  const count = existingWorkers[0]?.cnt ?? 0;
+  if (Number(count) > 0) {
+    console.log(`[DB] Already seeded with ${count} workers`);
+    return;
+  }
+
+  console.log('[DB] Seeding from seed-data.json...');
+  const seedData = JSON.parse(fs.readFileSync(SEED_DATA_PATH, 'utf8'));
+
+  // Companies
+  for (const c of (seedData.companies || [])) {
+    await db.runQuery(
+      'INSERT OR IGNORE INTO companies (id, name, code) VALUES (?, ?, ?)',
+      [c.id, c.name, c.code]
+    );
+  }
+
+  // Workers
+  for (const w of (seedData.workers || [])) {
+    await db.runQuery(
+      `INSERT OR IGNORE INTO workers
+       (id, company_id, nombre, apellido1, apellido2, dni, naf,
+        fecha_nacimiento, fecha_alta, fecha_antiguedad, puesto, email,
+        ubicacion, revision_medica, formacion_prl, prl_modo,
+        carnet_carretillero, carnet_3a_3b, fecha_baja, estado,
+        telefono, direccion, departamento)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [w.id, w.company_id, w.nombre, w.apellido1, w.apellido2, w.dni, w.naf,
+       w.fecha_nacimiento, w.fecha_alta, w.fecha_antiguedad, w.puesto, w.email,
+       w.ubicacion, w.revision_medica, w.formacion_prl, w.prl_modo,
+       w.carnet_carretillero, w.carnet_3a_3b, w.fecha_baja, w.estado,
+       w.telefono, w.direccion, w.departamento]
+    );
+  }
+
+  // Admin user
+  for (const u of (seedData.users || [])) {
+    await db.runQuery(
+      'INSERT OR IGNORE INTO users (id, email, password_hash, role) VALUES (?,?,?,?)',
+      [u.id, u.email, u.password_hash, u.role]
+    );
+  }
+
+  // Vacations
+  for (const v of (seedData.vacations || [])) {
+    await db.runQuery(
+      'INSERT OR IGNORE INTO vacations (id, worker_id, fecha_inicio, fecha_fin, dias, tipo, estado, notas) VALUES (?,?,?,?,?,?,?,?)',
+      [v.id, v.worker_id, v.fecha_inicio, v.fecha_fin, v.dias, v.tipo, v.estado, v.notas]
+    );
+  }
+
+  // Absences
+  for (const a of (seedData.absences || [])) {
+    await db.runQuery(
+      'INSERT OR IGNORE INTO absences (id, worker_id, tipo, fecha_inicio, fecha_fin, horas, observaciones) VALUES (?,?,?,?,?,?,?)',
+      [a.id, a.worker_id, a.tipo, a.fecha_inicio, a.fecha_fin, a.horas, a.observaciones]
+    );
+  }
+
+  console.log(`[DB] ✅ Seeded ${seedData.workers?.length} workers, ${seedData.companies?.length} companies`);
+}
+
+// ============================================================
+// MAIN ENTRY
+// ============================================================
+async function getDb() {
+  if (_universalDb) return _universalDb;
+
+  try {
+    if (IS_TURSO) {
+      _universalDb = await getTursoDb();
+    } else {
+      _universalDb = await getSqlJsDb();
     }
+
+    await initSchema(_universalDb);
+    await seedFromJson(_universalDb);
+
+  } catch (err) {
+    console.error('[DB] Fatal error initializing database:', err.message);
+    throw err;
   }
 
   return _universalDb;

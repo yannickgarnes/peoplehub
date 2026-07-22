@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Plataforma de Recursos Humanos - Grupo Nofer">
+    <title>Grupo Nofer - Plataforma de Recursos Humanos</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/styles.css">
+    <link rel="icon" type="image/png" href="/images/nofer_logo.png">
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="login-screen" class="login-screen">
+        <div class="login-container">
+            <div class="login-brand">
+                <div class="login-logo" style="display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 16px;">
+                    <img src="/images/nofer_soft_blue.png" alt="NOFER Logo" style="height: 58px; width: auto; object-fit: contain;">
+                </div>
+                <h1 style="color: #5c2c0c; font-size: 2.1rem; font-weight: 800; letter-spacing: -0.02em;">Grupo Nofer</h1>
+                <p style="color: #78350f; font-weight: 700;">Plataforma de Recursos Humanos</p>
+            </div>
+            <form id="login-form" class="login-form">
+                <div class="form-group">
+                    <label for="login-email">Correo electrónico</label>
+                    <input type="email" id="login-email" placeholder="tu@email.com" required autocomplete="email">
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Contraseña</label>
+                    <input type="password" id="login-password" placeholder="Tu DNI o contraseña" required autocomplete="current-password">
+                </div>
+                <div id="login-error" class="login-error" style="display:none"></div>
+                <button type="submit" class="btn btn-primary btn-full" id="login-btn">
+                    <span>Iniciar Sesión</span>
+                    <svg class="btn-arrow" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"/></svg>
+                </button>
+            </form>
+            <div class="login-footer">
+                <p>GRUPO NOFER © 2026</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App -->
+    <div id="app" class="app-layout" style="display:none">
+        <!-- Sidebar -->
+        <aside id="sidebar" class="sidebar">
+            <div class="sidebar-header" style="padding: 18px 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
+                    <img src="/images/nofer_soft_blue.png" alt="NOFER" style="height: 56px; width: auto; object-fit: contain;">
+                </div>
+                <div class="sidebar-brand" style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                    <h2 style="color: #3d1b06; font-size: 1.35rem; font-weight: 800; margin: 0;">Grupo Nofer</h2>
+                    <span class="sidebar-badge" style="background: #5c2c0c; color: white; font-weight: 800;">Admin</span>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#dashboard" class="nav-item active" data-page="dashboard">
+                    <span style="font-size: 1.25rem;">📊</span>
+                    <span>Dashboard Principal</span>
+                </a>
+                <a href="#workers" class="nav-item" data-page="workers">
+                    <span style="font-size: 1.25rem;">👥</span>
+                    <span>Trabajadores (Plantilla)</span>
+                </a>
+                <a href="#companies" class="nav-item" data-page="companies">
+                    <span style="font-size: 1.25rem;">🏢</span>
+                    <span>Empresas del Grupo</span>
+                </a>
+                <a href="#calendar" class="nav-item" data-page="calendar">
+                    <span style="font-size: 1.25rem;">🌴</span>
+                    <span>Vacaciones y Ausencias</span>
+                </a>
+                <a href="#documents" class="nav-item" data-page="documents">
+                    <span style="font-size: 1.25rem;">📚</span>
+                    <span>Documentos y Firmas</span>
+                </a>
+                <a href="#prl50h" class="nav-item" data-page="prl50h">
+                    <span style="font-size: 1.25rem;">🛡️</span>
+                    <span>Curso 50h PRL (Delegados)</span>
+                </a>
+                <div class="nav-divider admin-only"></div>
+                <a href="#admin" class="nav-item admin-only" data-page="admin">
+                    <span style="font-size: 1.25rem;">⚙️</span>
+                    <span>Administración</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="sidebar-user">
+                    <div class="user-avatar" id="sidebar-user-avatar">A</div>
+                    <div class="user-info">
+                        <span class="user-name" id="sidebar-user-name">Admin</span>
+                        <span class="user-role" id="sidebar-user-role">Administrador</span>
+                    </div>
+                </div>
+                <button class="btn-logout" id="btn-logout" title="Cerrar sesión">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="top-bar">
+                <button class="sidebar-toggle" id="sidebar-toggle">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
+                <div class="search-box">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                    <input type="text" id="global-search" placeholder="Buscar trabajador por nombre o DNI...">
+                </div>
+                <div class="top-bar-right">
+                    <div class="top-bar-date" id="top-bar-date"></div>
+                </div>
+            </header>
+            <div class="content-area" id="content-area">
+                <!-- Dynamic content loaded here -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal container -->
+    <div id="modal-overlay" class="modal-overlay" style="display:none">
+        <div class="modal" id="modal-container">
+            <div class="modal-header">
+                <h3 id="modal-title"></h3>
+                <button class="modal-close" id="modal-close">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+            <div class="modal-footer" id="modal-footer"></div>
+        </div>
+    </div>
+
+    <!-- Toast container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>

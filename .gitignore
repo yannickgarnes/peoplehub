@@ -1,0 +1,9 @@
+# ESSAI HR Platform
+node_modules/
+data/essai.db
+*.log
+.env
+.env.local
+.env.production
+uploads/
+public/uploads/

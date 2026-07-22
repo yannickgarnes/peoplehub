@@ -1,0 +1,28 @@
+{
+  "name": "essai-hr-platform",
+  "version": "1.0.0",
+  "description": "Plataforma de Recursos Humanos - ESSAI GROUP NOFER",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "seed": "node server/database/seed.js",
+    "build": "echo 'No build step required'"
+  },
+  "engines": {
+    "node": ">=18.x"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.17.4",
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "sql.js": "^1.11.0",
+    "xlsx": "^0.18.5"
+  }
+}
+

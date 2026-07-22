@@ -11,6 +11,7 @@ const workersRoutes = require('./routes/workers');
 const vacationsRoutes = require('./routes/vacations');
 const absencesRoutes = require('./routes/absences');
 const documentsRoutes = require('./routes/documents');
+const importRoutes = require('./routes/import');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -32,6 +33,7 @@ app.use('/api/workers', workersRoutes);
 app.use('/api/vacations', vacationsRoutes);
 app.use('/api/absences', absencesRoutes);
 app.use('/api/documents', documentsRoutes);
+app.use('/api/import', importRoutes);
 
 // SPA Fallback: serve index.html for all non-API routes
 app.get('*', (req, res) => {

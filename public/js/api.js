@@ -58,4 +58,10 @@ const API = {
   uploadDocument: (formData) => API.upload('/documents/upload', formData),
   signDocument: (id, body = {}) => API.request('PUT', `/documents/${id}/sign`, body),
   deleteDocument: (id) => API.request('DELETE', `/documents/${id}`),
+  viewDocument: (id) => `/api/documents/${id}/download`,
+
+  // Import / Excel sync
+  importExcel: (formData) => API.upload('/import/excel', formData),
+  getImportLog: () => API.request('GET', '/import/log'),
 };
+

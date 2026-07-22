@@ -204,6 +204,7 @@
       case 'calendar': renderCalendar(content, params); break;
       case 'documents': renderDocuments(content, params); break;
       case 'prl50h': renderPrl50h(content); break;
+      case 'import-excel': renderExcelImportPanel(content); break;
       case 'admin': renderAdmin(content); break;
       default: renderDashboard(content);
     }
@@ -1433,7 +1434,7 @@
           <h3 style="font-size: 1.2rem; font-weight: 800; color: var(--accent-primary); margin-bottom: 16px;">📄 Lista Global de Documentos Subidos (${documents.length})</h3>
           ${documents.length === 0
             ? '<div class="empty-state"><p>No hay documentos guardados aún en la plataforma</p></div>'
-            : `<div class="table-responsive"><table class="data-table"><thead><tr><th>Documento / Título</th><th>Trabajador</th><th>Categoría</th><th>Fecha Subida</th><th>Estado Firma</th></tr></thead><tbody>` +
+            : `<div class="table-responsive"><table class="data-table"><thead><tr><th>Documento / Título</th><th>Trabajador</th><th>Categoría</th><th>Fecha Subida</th><th>Estado Firma</th><th>Acciones</th></tr></thead><tbody>` +
               documents.map(d => `
                 <tr>
                   <td><strong>📄 ${d.nombre}</strong></td>
@@ -1441,6 +1442,10 @@
                   <td><span class="badge" style="font-weight:700;">${docTypeLabel(d.tipo)}</span></td>
                   <td>${formatDate(d.fecha_subida)}</td>
                   <td>${d.firmado ? '<span class="badge signed">✅ Firmado</span>' : '<span class="badge required">⚠️ Pendiente Firma</span>'}</td>
+                  <td style="white-space:nowrap;">
+                    <button onclick="viewDocument(${d.id}, '${(d.nombre||'').replace(/'/g,"'")}', '${d.ruta_archivo}')" title="Ver documento" style="background:linear-gradient(135deg,#1d4ed8,#1e40af);color:#fff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;font-weight:700;font-size:0.8rem;margin-right:4px;">👁️ Ver</button>
+                    <a href="/api/documents/${d.id}/download" download="${d.nombre}" title="Descargar" style="background:linear-gradient(135deg,#15803d,#14532d);color:#fff;border:none;border-radius:6px;padding:5px 10px;font-weight:700;font-size:0.8rem;text-decoration:none;display:inline-block;">⬇️</a>
+                  </td>
                 </tr>
               `).join('') + `</tbody></table></div>`
           }
@@ -2235,3 +2240,225 @@
     init();
   }
 })();
+
+// ============================================================
+// DOCUMENT VIEWER — open any document in a full-screen modal
+// ============================================================
+function viewDocument(docId, docName, docUrl) {
+  const existing = document.getElementById('doc-viewer-overlay');
+  if (existing) existing.remove();
+
+  const ext = (docName || '').split('.').pop().toLowerCase();
+  const isImage = ['jpg','jpeg','png','gif','webp','bmp'].includes(ext);
+  const isPdf = ext === 'pdf';
+  const isOffice = ['doc','docx','xls','xlsx','ppt','pptx'].includes(ext);
+
+  let viewerContent = '';
+  if (isPdf || isImage) {
+    viewerContent = `<iframe class="doc-viewer-iframe" src="${docUrl}" title="${docName}"></iframe>`;
+  } else if (isOffice) {
+    // Use Microsoft Office Online viewer for Office files
+    const encodedUrl = encodeURIComponent(window.location.origin + docUrl);
+    viewerContent = `<iframe class="doc-viewer-iframe"
+      src="https://view.officeapps.live.com/op/embed.aspx?src=${encodedUrl}"
+      title="${docName}"></iframe>`;
+  } else {
+    viewerContent = `<div class="doc-viewer-iframe" style="display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;background:#f5f5f5;">
+      <span style="font-size:4rem;">📄</span>
+      <p style="font-size:1.1rem;color:#555;font-weight:600;">${docName}</p>
+      <p style="color:#888;">Este formato no se puede previsualizar. Descárgalo para verlo.</p>
+    </div>`;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'doc-viewer-overlay';
+  overlay.className = 'doc-viewer-overlay';
+  overlay.innerHTML = `
+    <div class="doc-viewer-box">
+      <div class="doc-viewer-header">
+        <span style="font-size:1.5rem;">📄</span>
+        <h3>${docName || 'Documento'}</h3>
+        <button class="doc-viewer-close" onclick="document.getElementById('doc-viewer-overlay').remove()" title="Cerrar">✕</button>
+      </div>
+      ${viewerContent}
+      <div class="doc-viewer-actions">
+        <a href="${docUrl}" download="${docName}" class="btn btn-primary" style="font-weight:700;background:linear-gradient(135deg,#3d1b06,#5c2c0c);color:#fff;padding:8px 18px;border-radius:8px;text-decoration:none;">
+          ⬇️ Descargar
+        </a>
+        <button onclick="document.getElementById('doc-viewer-overlay').remove()" class="btn btn-secondary" style="font-weight:700;">✕ Cerrar</button>
+        <span style="margin-left:auto;color:#888;font-size:0.8rem;">Presiona ESC para cerrar</span>
+      </div>
+    </div>
+  `;
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+  document.addEventListener('keydown', function esc(e) {
+    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); }
+  });
+
+  document.body.appendChild(overlay);
+}
+
+// ============================================================
+// EXCEL IMPORT PANEL — show in admin area
+// ============================================================
+function renderExcelImportPanel(container) {
+  container.innerHTML = `
+    <div class="page-header">
+      <h1 style="font-size:1.6rem;font-weight:900;color:var(--accent-primary);">📊 Importar / Actualizar desde Excel</h1>
+      <p style="color:var(--text-secondary);">Sube un fichero Excel con datos de trabajadores. El sistema comparará por DNI y actualizará automáticamente los datos existentes o creará nuevos trabajadores.</p>
+    </div>
+
+    <div class="import-panel">
+      <h3>🗂️ Subir Excel de Trabajadores</h3>
+      <div class="import-dropzone" id="import-dropzone" onclick="document.getElementById('excel-file-input').click()">
+        <span class="import-icon">📂</span>
+        <strong style="font-size:1.05rem;color:#14532d;">Arrastra aquí tu Excel o haz clic para seleccionar</strong>
+        <p style="color:#6b7280;margin:6px 0 0 0;font-size:0.9rem;">Formatos aceptados: .xlsx, .xls · El sistema detecta DNI/NIE para vincular trabajadores existentes</p>
+        <input type="file" id="excel-file-input" accept=".xlsx,.xls" style="display:none"
+          onchange="handleExcelImport(this.files[0])">
+      </div>
+
+      <div id="import-progress" style="display:none;margin-top:14px;">
+        <div style="display:flex;align-items:center;gap:10px;padding:14px;background:rgba(255,255,255,0.8);border-radius:10px;">
+          <div style="width:24px;height:24px;border:3px solid #15803d;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+          <span style="font-weight:700;color:#14532d;">Procesando Excel...</span>
+        </div>
+      </div>
+      <div id="import-result" style="display:none;margin-top:14px;"></div>
+    </div>
+
+    <div class="import-panel" style="background:linear-gradient(135deg,#eff6ff,#dbeafe);border-color:#2563eb;">
+      <h3 style="color:#1e3a8a;">📋 Historial de Importaciones</h3>
+      <div id="import-log-container">
+        <p style="color:#6b7280;">Cargando historial...</p>
+      </div>
+    </div>
+  `;
+
+  // Drag and drop support
+  const dz = document.getElementById('import-dropzone');
+  dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dz.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) handleExcelImport(file);
+  });
+
+  loadImportLog();
+}
+
+async function handleExcelImport(file) {
+  if (!file) return;
+  const progress = document.getElementById('import-progress');
+  const result = document.getElementById('import-result');
+  progress.style.display = 'block';
+  result.style.display = 'none';
+
+  try {
+    const fd = new FormData();
+    fd.append('excel', file);
+    const data = await API.importExcel(fd);
+
+    result.style.display = 'block';
+    result.innerHTML = `
+      <div style="background:${data.success ? '#dcfce7' : '#fee2e2'};border:2px solid ${data.success ? '#15803d' : '#dc2626'};border-radius:10px;padding:16px 20px;">
+        <div style="font-size:1.2rem;font-weight:900;color:${data.success ? '#14532d' : '#991b1b'};margin-bottom:8px;">
+          ${data.success ? '✅' : '❌'} ${data.message || 'Proceso completado'}
+        </div>
+        ${data.results ? `
+          <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:8px;">
+            <span style="background:#dbeafe;color:#1e3a8a;padding:4px 12px;border-radius:20px;font-weight:700;">🔄 ${data.results.updated} actualizados</span>
+            <span style="background:#dcfce7;color:#14532d;padding:4px 12px;border-radius:20px;font-weight:700;">➕ ${data.results.created} nuevos</span>
+            <span style="background:#f5f5f5;color:#555;padding:4px 12px;border-radius:20px;font-weight:700;">⏭️ ${data.results.skipped} sin cambios</span>
+          </div>
+        ` : ''}
+      </div>
+    `;
+    loadImportLog();
+    // Refresh workers data in the app
+    if (window.appState) { window.appState.workers = null; }
+  } catch (err) {
+    result.style.display = 'block';
+    result.innerHTML = `<div style="background:#fee2e2;border:2px solid #dc2626;border-radius:10px;padding:14px;color:#991b1b;font-weight:700;">❌ Error: ${err.message}</div>`;
+  } finally {
+    progress.style.display = 'none';
+  }
+}
+
+async function loadImportLog() {
+  const container = document.getElementById('import-log-container');
+  if (!container) return;
+  try {
+    const log = await API.getImportLog();
+    if (!log.length) {
+      container.innerHTML = '<p style="color:#6b7280;font-size:0.9rem;">No hay importaciones registradas todavía.</p>';
+      return;
+    }
+    container.innerHTML = log.slice(0, 10).map(entry => `
+      <div class="import-log-item">
+        <span style="font-size:1.2rem;">📊</span>
+        <div style="flex:1;">
+          <strong>${entry.filename}</strong>
+          <span style="color:#6b7280;font-size:0.8rem;margin-left:10px;">${new Date(entry.date).toLocaleString('es-ES')}</span>
+        </div>
+        <div style="display:flex;gap:8px;font-size:0.8rem;">
+          <span style="background:#dbeafe;color:#1e3a8a;padding:2px 8px;border-radius:12px;font-weight:700;">${entry.results?.updated || 0} act.</span>
+          <span style="background:#dcfce7;color:#14532d;padding:2px 8px;border-radius:12px;font-weight:700;">${entry.results?.created || 0} nuevos</span>
+        </div>
+      </div>
+    `).join('');
+  } catch {
+    container.innerHTML = '<p style="color:#6b7280;">No se pudo cargar el historial.</p>';
+  }
+}
+
+// ============================================================
+// INLINE CELL EDIT — make any cell editable like Excel
+// ============================================================
+function makeEditable(el, currentValue, onSave, type = 'text', options = null) {
+  if (el.querySelector('input, select')) return; // already editing
+
+  const originalContent = el.innerHTML;
+  let input;
+
+  if (type === 'select' && options) {
+    input = document.createElement('select');
+    input.innerHTML = options.map(o => `<option value="${o.value}" ${o.value == currentValue ? 'selected' : ''}>${o.label}</option>`).join('');
+  } else if (type === 'date') {
+    input = document.createElement('input');
+    input.type = 'date';
+    input.value = currentValue || '';
+  } else if (type === 'color') {
+    input = document.createElement('input');
+    input.type = 'color';
+    input.value = currentValue || '#1d4ed8';
+  } else {
+    input = document.createElement('input');
+    input.type = type;
+    input.value = currentValue || '';
+  }
+
+  input.style.cssText = 'border:2px solid #2563eb;border-radius:4px;padding:3px 8px;font-size:inherit;background:#fff;min-width:80px;outline:none;';
+
+  const save = () => {
+    const newVal = input.value;
+    el.innerHTML = originalContent;
+    onSave(newVal);
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); save(); }
+    if (e.key === 'Escape') { el.innerHTML = originalContent; }
+  });
+  input.addEventListener('blur', save);
+
+  el.innerHTML = '';
+  el.appendChild(input);
+  input.focus();
+  if (input.select) input.select();
+}

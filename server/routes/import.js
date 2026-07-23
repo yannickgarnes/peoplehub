@@ -95,6 +95,8 @@ router.post('/excel', requireAdmin, upload.single('excel'), async (req, res) => 
       return null;
     };
 
+    const processedIds = new Set();
+
     // Process each sheet looking for worker data
     for (const sheetName of wb.SheetNames) {
       const sheet = wb.Sheets[sheetName];
@@ -197,18 +199,36 @@ router.post('/excel', requireAdmin, upload.single('excel'), async (req, res) => 
             `UPDATE workers SET ${setClauses} WHERE id = ?`,
             [...Object.values(workerData), wId]
           );
+          processedIds.add(wId);
           results.updated++;
         } else {
           // INSERT new worker
           const cols = Object.keys(workerData).join(', ');
           const vals = Object.keys(workerData).map(() => '?').join(', ');
-          await db.runQuery(
+          const resIns = await db.runQuery(
             `INSERT INTO workers (${cols}) VALUES (${vals})`,
             Object.values(workerData)
           );
+          if (resIns && resIns.lastInsertRowid) {
+            processedIds.add(resIns.lastInsertRowid);
+          }
           results.created++;
         }
       }
+    }
+
+    // Mark workers not in the Excel as "inactivo"
+    // Only do this if we processed a significant amount of workers (e.g. > 10) 
+    // to prevent accidental wiping if a tiny excel is uploaded.
+    results.deactivated = 0;
+    if (processedIds.size > 10) {
+      const pIds = Array.from(processedIds);
+      const placeholders = pIds.map(() => '?').join(',');
+      const deactRes = await db.runQuery(
+        `UPDATE workers SET estado = 'inactivo' WHERE (estado = 'activo' OR estado IS NULL) AND id NOT IN (${placeholders})`,
+        pIds
+      );
+      results.deactivated = deactRes ? (deactRes.changes || 0) : 0;
     }
 
     // Log import

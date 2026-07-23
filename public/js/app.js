@@ -210,6 +210,44 @@
     }
   }
 
+  // ===== SAFE WORKERS LOADER (prevents "forEach is not a function") =====
+  async function ensureWorkers() {
+    if (!Array.isArray(allWorkers) || allWorkers.length === 0) {
+      try {
+        const data = await API.getWorkers();
+        allWorkers = toArray(typeof data !== 'undefined' ? data : (typeof workersData !== 'undefined' ? workersData : []), 'workers');
+      } catch (e) {
+        console.warn('Could not load workers:', e.message);
+        allWorkers = [];
+      }
+    }
+    return allWorkers;
+  }
+
+  async function ensureCompanies() {
+    if (!Array.isArray(allCompanies) || allCompanies.length === 0) {
+      try {
+        const data = await API.request('GET', '/companies');
+        allCompanies = Array.isArray(data) ? data : (data.companies || []);
+      } catch (e) {
+        allCompanies = [];
+      }
+    }
+    return allCompanies;
+  }
+
+  // Safe array normalizer — prevents TypeError on any API response shape
+  function toArray(data, key) {
+    if (!data) return [];
+    if (Array.isArray(data)) return data;
+    if (key && Array.isArray(data[key])) return data[key];
+    // Try common keys
+    for (const k of ['workers','companies','vacations','absences','documents','data','items','results']) {
+      if (Array.isArray(data[k])) return data[k];
+    }
+    return [];
+  }
+
   // ===== DASHBOARD =====
   async function renderDashboard(container) {
     try {
@@ -219,9 +257,9 @@
         API.getAbsences().catch(() => ({ absences: [] }))
       ]);
 
-      allWorkers = Array.isArray(workersData) ? workersData : (workersData.workers || []);
-      const vacations = Array.isArray(vacationsData) ? vacationsData : (vacationsData.vacations || []);
-      const absences = Array.isArray(absencesData) ? absencesData : (absencesData.absences || []);
+      allWorkers = toArray(workersData, 'workers');
+      const vacations = toArray(vacationsData, 'vacations');
+      const absences = toArray(absencesData, 'absences');
 
       const today = new Date().toISOString().split('T')[0];
       const activeWorkers = allWorkers.filter(w => w.estado === 'activo');
@@ -752,7 +790,7 @@
       if (params.company_id) queryParts.push(`company_id=${params.company_id}`);
 
       const data = await API.getWorkers(queryParts.join('&'));
-      allWorkers = Array.isArray(data) ? data : (data.workers || []);
+      allWorkers = toArray(typeof data !== 'undefined' ? data : (typeof workersData !== 'undefined' ? workersData : []), 'workers');
 
       // Get unique companies
       const companySet = new Map();
@@ -1110,7 +1148,7 @@
       API.getWorkers()
       ]);
 
-      allWorkers = Array.isArray(workersData) ? workersData : (workersData.workers || []);
+      allWorkers = toArray(typeof data !== 'undefined' ? data : (typeof workersData !== 'undefined' ? workersData : []), 'workers');
       const vacations = Array.isArray(calData) ? calData : (calData.calendar || calData.vacations || []);
       const absences = Array.isArray(absData) ? absData : (absData.absences || []);
 

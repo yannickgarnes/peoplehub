@@ -2409,7 +2409,50 @@ function renderExcelImportPanel(container) {
   loadImportLog();
 }
 
-async function handleExcelImport(file) {
+function openPasswordExcelModal(file) {
+  const modalHtml = `
+    <div id="excel-password-modal" class="modal-overlay" style="display: flex; position: fixed; inset: 0; background: rgba(36, 15, 3, 0.75); z-index: 2000; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
+      <div class="modal-card" style="background: var(--bg-card); border: 3px solid #d97706; border-radius: var(--border-radius-lg); width: 100%; max-width: 480px; padding: 28px; box-shadow: var(--shadow-lg);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 2px solid var(--border-color); padding-bottom: 12px;">
+          <h3 style="font-size: 1.3rem; font-weight: 900; color: #b45309; display: flex; align-items: center; gap: 8px; margin: 0;">
+            <span>🔒 Excel Protegido con Contraseña</span>
+          </h3>
+          <button onclick="document.getElementById('excel-password-modal').remove()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer;">✕</button>
+        </div>
+        <p style="font-size: 0.95rem; color: var(--text-secondary); margin-bottom: 20px; font-weight: 500; line-height: 1.5;">
+          El archivo Excel que has seleccionado (<strong>${file.name}</strong>) requiere una contraseña para abrirse. Introduce la contraseña para descifrarlo e importar la plantilla:
+        </p>
+        <form id="excel-password-form">
+          <div class="form-group" style="margin-bottom: 20px;">
+            <label style="font-weight: 700; display: block; margin-bottom: 8px;">Contraseña del Archivo Excel:</label>
+            <input type="password" id="excel-file-password" class="form-control" placeholder="Introduce la contraseña (ej. 250268)..." style="width: 100%; padding: 12px; border-radius: 8px; border: 2px solid var(--border-color); font-size: 1.05rem; background: var(--bg-input);" required autofocus>
+          </div>
+          <div style="display: flex; gap: 12px; justify-content: flex-end;">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('excel-password-modal').remove()">Cancelar</button>
+            <button type="submit" class="btn btn-primary" style="background: linear-gradient(135deg, #d97706, #b45309); color: #ffffff; font-weight: 800; padding: 10px 20px; border-radius: 8px; border: none;">
+              🔓 Descifrar e Importar
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+  const existing = document.getElementById('excel-password-modal');
+  if (existing) existing.remove();
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+  const pwdInput = document.getElementById('excel-file-password');
+  if (pwdInput) pwdInput.focus();
+
+  document.getElementById('excel-password-form').onsubmit = (e) => {
+    e.preventDefault();
+    const pwd = document.getElementById('excel-file-password').value;
+    document.getElementById('excel-password-modal').remove();
+    handleExcelImport(file, pwd);
+  };
+}
+
+async function handleExcelImport(file, password = null) {
   if (!file) return;
   const progress = document.getElementById('import-progress');
   const result = document.getElementById('import-result');
@@ -2419,6 +2462,8 @@ async function handleExcelImport(file) {
   try {
     const fd = new FormData();
     fd.append('excel', file);
+    if (password) fd.append('password', password);
+
     const data = await API.importExcel(fd);
 
     result.style.display = 'block';
@@ -2432,16 +2477,21 @@ async function handleExcelImport(file) {
             <span style="background:#dbeafe;color:#1e3a8a;padding:4px 12px;border-radius:20px;font-weight:700;">🔄 ${data.results.updated} actualizados</span>
             <span style="background:#dcfce7;color:#14532d;padding:4px 12px;border-radius:20px;font-weight:700;">➕ ${data.results.created} nuevos</span>
             <span style="background:#f5f5f5;color:#555;padding:4px 12px;border-radius:20px;font-weight:700;">⏭️ ${data.results.skipped} sin cambios</span>
+            ${data.results.deactivated ? `<span style="background:#fef3c7;color:#92400e;padding:4px 12px;border-radius:20px;font-weight:700;">💤 ${data.results.deactivated} marcados inactivos</span>` : ''}
           </div>
         ` : ''}
       </div>
     `;
     loadImportLog();
-    // Refresh workers data in the app
     if (window.appState) { window.appState.workers = null; }
   } catch (err) {
-    result.style.display = 'block';
-    result.innerHTML = `<div style="background:#fee2e2;border:2px solid #dc2626;border-radius:10px;padding:14px;color:#991b1b;font-weight:700;">❌ Error: ${err.message}</div>`;
+    const errMsg = (err.message || '').toLowerCase();
+    if (errMsg.includes('password') || errMsg.includes('protegido') || errMsg.includes('contraseña') || err.password_required) {
+      openPasswordExcelModal(file);
+    } else {
+      result.style.display = 'block';
+      result.innerHTML = `<div style="background:#fee2e2;border:2px solid #dc2626;border-radius:10px;padding:14px;color:#991b1b;font-weight:700;">❌ Error: ${err.message}</div>`;
+    }
   } finally {
     progress.style.display = 'none';
   }

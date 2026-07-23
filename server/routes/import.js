@@ -59,6 +59,33 @@ const fmtDate = (val) => {
   return s;
 };
 
+function tryDecryptExcel(filePath, password) {
+  if (!password) return filePath;
+  const decryptedPath = filePath + '_decrypted.xlsx';
+  const pyCode = `import msoffcrypto
+with open(r'${filePath}', 'rb') as f:
+    file = msoffcrypto.OfficeFile(f)
+    if file.is_encrypted():
+        file.load_key(password=r'${password}')
+        with open(r'${decryptedPath}', 'wb') as out:
+            file.decrypt(out)
+`;
+  const scriptPath = filePath + '_decrypt.py';
+  try {
+    fs.writeFileSync(scriptPath, pyCode);
+    const { execSync } = require('child_process');
+    execSync(`py "${scriptPath}"`, { stdio: 'pipe', timeout: 10000 });
+    if (fs.existsSync(decryptedPath)) {
+      return decryptedPath;
+    }
+  } catch (e) {
+    console.error('Decryption helper error:', e.message);
+  } finally {
+    try { if (fs.existsSync(scriptPath)) fs.unlinkSync(scriptPath); } catch {}
+  }
+  return filePath;
+}
+
 /**
  * POST /api/import/excel
  * Upload Excel and sync worker data
@@ -70,7 +97,26 @@ router.post('/excel', requireAdmin, upload.single('excel'), async (req, res) => 
     const xlsx = require('xlsx');
     const db = await getDb();
 
-    const wb = xlsx.readFile(req.file.path);
+    const password = req.body.password || req.query.password;
+    let filePathToRead = req.file.path;
+
+    if (password) {
+      filePathToRead = tryDecryptExcel(req.file.path, password);
+    }
+
+    let wb;
+    try {
+      wb = xlsx.readFile(filePathToRead, { password: password || '' });
+    } catch (readErr) {
+      if (readErr.message && (readErr.message.includes('password-protected') || readErr.message.includes('password'))) {
+        return res.status(400).json({
+          password_required: true,
+          error: 'File is password-protected. Por favor introduce la contraseña.'
+        });
+      }
+      throw readErr;
+    }
+
     const results = { updated: 0, created: 0, skipped: 0, errors: [] };
 
     // Map company codes to IDs

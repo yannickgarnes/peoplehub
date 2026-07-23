@@ -68,12 +68,13 @@ router.get('/calendar', authenticateToken, async (req, res) => {
             params.push(req.user.worker_id);
         }
         
-        const vacations = db.query(query, params);
+        const vacations = await db.query(query, params);
+        const vacList = Array.isArray(vacations) ? vacations : [];
         
         // Group by worker
         const calendarDataMap = new Map();
         
-        vacations.forEach(v => {
+        vacList.forEach(v => {
             if (!calendarDataMap.has(v.worker_id)) {
                 calendarDataMap.set(v.worker_id, {
                     worker_id: v.worker_id,

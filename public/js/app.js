@@ -646,7 +646,8 @@
             <div class="form-group" style="margin-bottom: 16px;">
               <label style="font-weight: 700; display: block; margin-bottom: 6px;">Tipo de Incidencia / Ausencia:</label>
               <select id="abs-tipo" class="form-control" style="width: 100%; padding: 10px; border-radius: var(--border-radius-sm); border: 1px solid var(--border-color); background: var(--bg-input);" required>
-                <option value="vacaciones">🏖️ Vacaciones (V26)</option>
+                <option value="vacaciones">🏖️ Vacaciones Confirmadas (Azul Marino)</option>
+                <option value="vacaciones_solicitadas">🔹 Vacaciones Solicitadas (Azul Eléctrico Intenso)</option>
                 <option value="ilt">🟢 Baja por Enfermedad (ILT)</option>
                 <option value="accidente_trabajo">🔴 Accidente de Trabajo (ACC)</option>
                 <option value="baja_paternal">🔵 Baja Paternal / Maternal</option>
@@ -686,8 +687,8 @@
     const fin = document.getElementById('abs-fin').value;
 
     try {
-      if (tipo === 'vacaciones') {
-        await API.createVacation({ worker_id: workerId, fecha_inicio: inicio, fecha_fin: fin, tipo: 'vacaciones' });
+      if (tipo === 'vacaciones' || tipo === 'vacaciones_solicitadas') {
+        await API.createVacation({ worker_id: workerId, fecha_inicio: inicio, fecha_fin: fin, tipo: tipo });
       } else {
         await API.createAbsence({ worker_id: workerId, tipo: tipo, fecha_inicio: inicio, fecha_fin: fin });
       }
@@ -785,12 +786,13 @@
   // ===== WORKERS DIRECTORY =====
   async function renderWorkers(container, params = {}) {
     try {
+      await ensureWorkers();
       const queryParts = [];
       if (params.search) queryParts.push(`search=${encodeURIComponent(params.search)}`);
       if (params.company_id) queryParts.push(`company_id=${params.company_id}`);
 
-      const data = await API.getWorkers(queryParts.join('&'));
-      allWorkers = toArray(typeof data !== 'undefined' ? data : (typeof workersData !== 'undefined' ? workersData : []), 'workers');
+      // Filter active workers by default for main view
+      const activeWorkersOnly = allWorkers.filter(w => w.estado === 'activo' || !w.estado);
 
       // Get unique companies
       const companySet = new Map();
@@ -820,9 +822,10 @@
             `).join('')}
           </select>
           <select class="filter-select" id="filter-status" onchange="filterWorkers()">
-            <option value="">Todos los estados</option>
-            <option value="activo">Activo</option>
-            <option value="baja">Baja</option>
+            <option value="activo" selected>🟢 Activos (Plantilla Actual)</option>
+            <option value="inactivo">💤 Inactivos (Ocultos)</option>
+            <option value="baja">🔴 Baja</option>
+            <option value="todos">👥 Todos los estados</option>
           </select>
           <select class="filter-select" id="filter-ubicacion" onchange="filterWorkers()">
             <option value="">Todas las ubicaciones</option>
@@ -830,11 +833,11 @@
               <option value="${u}">${u}</option>
             `).join('')}
           </select>
-          <span class="worker-count" id="worker-count">${allWorkers.length} trabajadores</span>
+          <span class="worker-count" id="worker-count">${activeWorkersOnly.length} trabajadores activos</span>
         </div>
 
         <div class="workers-grid" id="workers-grid">
-          ${renderWorkerCards(allWorkers)}
+          ${renderWorkerCards(activeWorkersOnly)}
         </div>
       `;
     } catch (err) {
@@ -857,7 +860,7 @@
             <span>${w.ubicacion || ''}</span>
           </div>
         </div>
-        <span class="worker-status ${w.estado === 'activo' ? 'active' : 'inactive'}">${w.estado === 'activo' ? 'Activo' : 'Baja'}</span>
+        <span class="worker-status ${w.estado === 'activo' ? 'active' : 'inactive'}">${w.estado === 'activo' ? 'Activo' : (w.estado === 'inactivo' ? 'Inactivo' : 'Baja')}</span>
       </div>
     `).join('');
   }
@@ -1138,17 +1141,15 @@
   // ===== CALENDAR =====
   async function renderCalendar(container, params = {}) {
     try {
+      await ensureWorkers();
       const now = new Date();
       const year = params.year || now.getFullYear();
       const month = params.month || (now.getMonth() + 1);
 
-      const [calData, absData, workersData] = await Promise.all([
+      const [calData, absData] = await Promise.all([
         API.getCalendar(`year=${year}&month=${month}`).catch(() => ({ calendar: [] })),
-        API.getAbsences(`year=${year}&month=${month}`).catch(() => ({ absences: [] })),
-      API.getWorkers()
+        API.getAbsences(`year=${year}&month=${month}`).catch(() => ({ absences: [] }))
       ]);
-
-      allWorkers = toArray(typeof data !== 'undefined' ? data : (typeof workersData !== 'undefined' ? workersData : []), 'workers');
       const vacations = Array.isArray(calData) ? calData : (calData.calendar || calData.vacations || []);
       const absences = Array.isArray(absData) ? absData : (absData.absences || []);
 
@@ -1162,7 +1163,7 @@
         return nameA.localeCompare(nameB, 'es', { sensitivity: 'base' });
       });
 
-      // Build vacation/absence lookup: workerId -> Set of day numbers
+      // Build vacation/absence lookup: workerId -> map of day -> tipo
       const vacLookup = {};
       const absLookup = {};
       vacations.forEach(v => {
@@ -1170,8 +1171,8 @@
         v.dates.forEach(d => {
           const dt = new Date(d);
           if (dt.getMonth() + 1 === month && dt.getFullYear() === year) {
-            if (!vacLookup[v.worker_id]) vacLookup[v.worker_id] = new Set();
-            vacLookup[v.worker_id].add(dt.getDate());
+            if (!vacLookup[v.worker_id]) vacLookup[v.worker_id] = {};
+            vacLookup[v.worker_id][dt.getDate()] = v.tipo || 'vacaciones';
           }
         });
       });
@@ -1253,7 +1254,8 @@
 
         <div class="calendar-controls">
           <div class="calendar-legend">
-            <span class="legend-item"><span class="legend-dot vacation"></span>🏖️ Vacaciones (V26)</span>
+            <span class="legend-item"><span class="legend-dot" style="background: #0369a1; border-radius:3px;"></span>🏖️ Vacaciones (Confirmadas)</span>
+            <span class="legend-item"><span class="legend-dot" style="background: #38bdf8; border:1px dashed #0c4a6e; border-radius:3px;"></span>🔹 Vacaciones (Solicitadas)</span>
             <span class="legend-item"><span class="legend-dot ilt"></span>🟢 Baja ILT</span>
             <span class="legend-item"><span class="legend-dot accident"></span>🔴 Accidente</span>
             <span class="legend-item"><span class="legend-dot paternal"></span>🔵 Baja Paternal</span>
@@ -1286,8 +1288,13 @@
                       const wAbs = absLookup[w.id];
                       const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(h.day).padStart(2,'0')}`;
                       
-                      if (wVac && wVac.has(h.day)) {
-                        content = `<span class="cal-day vacaciones" title="Vacaciones">🏖️ V26</span>`;
+                      if (wVac && wVac[h.day]) {
+                        const vType = wVac[h.day];
+                        if (vType === 'vacaciones_solicitadas') {
+                          content = `<span class="cal-day vacaciones_solicitadas" title="Vacaciones Solicitadas">🔹 V.Sol</span>`;
+                        } else {
+                          content = `<span class="cal-day vacaciones" title="Vacaciones Confirmadas">🏖️ V26</span>`;
+                        }
                       } else if (wAbs && wAbs[h.day]) {
                         const tipo = wAbs[h.day];
                         const iconMap = {
@@ -1397,6 +1404,7 @@
   // ===== DOCUMENTS & SIGNATURE PAGE =====
   async function renderDocuments(container, params = {}) {
     try {
+      await ensureWorkers();
       const data = await API.getDocuments();
       const documents = Array.isArray(data) ? data : (data.documents || []);
 
@@ -1497,6 +1505,7 @@
   // ===== 50H PRL DELEGADOS PAGE =====
   async function renderPrl50h(container) {
     try {
+      await ensureWorkers();
       const delegados = allWorkers.filter(w => w.prl_modo === '50h_delegado' || (w.puesto && (w.puesto.toLowerCase().includes('prevenci') || w.puesto.toLowerCase().includes('encargad') || w.puesto.toLowerCase().includes('responsable'))));
 
       container.innerHTML = `
@@ -1559,6 +1568,7 @@
 
   // ===== ADMIN PAGE WITH MODERN STATISTICAL CHARTS =====
   async function renderAdmin(container) {
+    await ensureWorkers();
     const totalWorkers = allWorkers.length || 160;
     const activeWorkers = allWorkers.filter(w => w.estado === 'activo').length || 155;
     const inactiveWorkers = totalWorkers - activeWorkers;
@@ -2042,12 +2052,21 @@
   // Worker filter
   window.filterWorkers = function() {
     const company = document.getElementById('filter-company')?.value;
-    const status = document.getElementById('filter-status')?.value;
+    const status = document.getElementById('filter-status')?.value || 'activo';
     const ubicacion = document.getElementById('filter-ubicacion')?.value;
 
     let filtered = allWorkers;
     if (company) filtered = filtered.filter(w => String(w.company_id) === company);
-    if (status) filtered = filtered.filter(w => w.estado === status);
+    
+    if (status === 'activo') {
+      filtered = filtered.filter(w => w.estado === 'activo' || !w.estado);
+    } else if (status === 'inactivo') {
+      filtered = filtered.filter(w => w.estado === 'inactivo');
+    } else if (status === 'baja') {
+      filtered = filtered.filter(w => w.estado === 'baja');
+    }
+    // if 'todos', we don't filter by status
+
     if (ubicacion) filtered = filtered.filter(w => w.ubicacion === ubicacion);
 
     document.getElementById('workers-grid').innerHTML = renderWorkerCards(filtered);

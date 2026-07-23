@@ -16,13 +16,14 @@ router.post('/login', async (req, res) => {
 
     const db = await getDb();
     
-    const users = db.query('SELECT * FROM users WHERE email = ?', [email]);
-    if (users.length === 0) {
+    const users = await db.query('SELECT * FROM users WHERE email = ?', [email]);
+    if (!users || users.length === 0) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
     
     const user = users[0];
-    const isMatch = await bcrypt.compare(password, user.password_hash);
+    const hash = user.password_hash || '';
+    const isMatch = hash ? await bcrypt.compare(password, hash) : false;
     
     if (!isMatch) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
